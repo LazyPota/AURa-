@@ -118,7 +118,7 @@ function App() {
     } catch (error) {
       console.error('Data fetch error:', error);
       setConnected(false);
-      setStatus({ message: 'Failed to fetch data', type: 'error' });
+      setStatus({ message: 'Faileds to fetch data', type: 'error' });
     }
   }, [status.type]);
 
