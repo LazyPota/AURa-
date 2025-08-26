@@ -11,7 +11,7 @@ async function getBackend() {
     backendPromise = (async () => {
       // Import canister declarations via Vite alias using literal specifiers so Vite resolves them
       const { idlFactory } = await import('declarations/aura-backend/aura-backend.did.js').catch((e) => {
-        console.error('[AURA] Failed to import declarations', didPath, e);
+        console.error('[AURA] Failed to import declarations from declarations/aura-backend/aura-backend.did.js', e);
         throw new Error(
           'Canister declarations not found. Run "dfx generate aura-backend" at the repo root to create the "declarations" folder.'
         );
@@ -142,6 +142,7 @@ export const startCycle = async () => {
 
 export const initialize = async () => {
   try {
+    const backend = await getBackend();
     return await backend.initialize();
   } catch (error) {
     console.error('Error initializing system:', error);
