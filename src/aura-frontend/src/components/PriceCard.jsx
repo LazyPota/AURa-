@@ -29,8 +29,8 @@ const PriceCard = ({ price, loading = false }) => {
     );
   }
 
-  const currentPrice = Number(price.price) || 0;
-  const change24h = Number(price.change24h) || 0;
+  const currentPrice = (typeof price.price === 'bigint' ? Number(price.price) : price.price) || 0;
+  const change24h = (typeof price.change24h === 'bigint' ? Number(price.change24h) : price.change24h) || 0;
   const isPositive = change24h >= 0;
 
   const formatPrice = (price) => {
@@ -124,7 +124,7 @@ const PriceCard = ({ price, loading = false }) => {
 
       {price.timestamp && (
         <div className="text-xs text-slate-500 dark:text-slate-400 text-center pt-3 border-t border-slate-200 dark:border-slate-700 mt-3">
-          Last updated: {new Date(Number(price.timestamp) / 1000000).toLocaleString()}
+          Last updated: {new Date((typeof price.timestamp === 'bigint' ? Number(price.timestamp) : price.timestamp) / 1000000).toLocaleString()}
         </div>
       )}
     </div>

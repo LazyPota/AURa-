@@ -3,6 +3,7 @@ import SentimentGauge from './components/SentimentGauge';
 import PriceCard from './components/PriceCard';
 import LogFeed from './components/LogFeed';
 import Architecture from './components/Architecture';
+import TradingSignals from './components/TradingSignals';
 import { 
   getDashboardData, 
   getLogs, 
@@ -11,7 +12,9 @@ import {
   clearLogs,
   setApiKey,
   checkConnection,
-  healthCheck
+  healthCheck,
+  startCycle,
+  initialize
 } from './api/backend';
 import { 
   FaRobot, 
@@ -44,6 +47,7 @@ function App() {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [apiKey, setApiKeyInput] = useState('');
   const [status, setStatus] = useState({ message: '', type: 'info' });
+  const [attemptedStart, setAttemptedStart] = useState(false);
 
   // Polling interval (15 seconds)
   const POLL_INTERVAL = 15000;
@@ -65,6 +69,12 @@ function App() {
   const initializeApp = async () => {
     setLoading(true);
     try {
+      // Attempt to initialize backend (idempotent): bootstraps authorization and starts cycle
+      try {
+        await initialize();
+      } catch (e) {
+        console.warn('Initialize call failed or may be already initialized:', e);
+      }
       await fetchAllData();
       setStatus({ message: 'AURA system connected successfully', type: 'success' });
     } catch (error) {
@@ -108,6 +118,16 @@ function App() {
       // Handle system status
       if (statusResult.status === 'fulfilled') {
         setSystemStatus(statusResult.value);
+        // Auto-start cycle once if inactive
+        if (!attemptedStart && statusResult.value && statusResult.value.isActive === false) {
+          try {
+            await startCycle();
+            setAttemptedStart(true);
+            setStatus({ message: 'Automated cycle started', type: 'success' });
+          } catch (e) {
+            console.warn('Failed to auto-start cycle:', e);
+          }
+        }
       }
 
       // Clear any previous error status
@@ -118,9 +138,9 @@ function App() {
     } catch (error) {
       console.error('Data fetch error:', error);
       setConnected(false);
-      setStatus({ message: 'Faileds to fetch data', type: 'error' });
+      setStatus({ message: 'Failed to fetch data', type: 'error' });
     }
-  }, [status.type]);
+  }, [status.type, attemptedStart]);
 
   // Manual update
   const handleManualUpdate = async () => {
@@ -164,7 +184,16 @@ function App() {
     }
 
     try {
-      await setApiKey(apiKey);
+      // Store API key in localStorage for frontend use
+      localStorage.setItem('newsApiKey', apiKey);
+      
+      // Also try to set it in the backend canister
+      try {
+        await setApiKey(apiKey);
+      } catch (backendError) {
+        console.warn('Backend API key update failed, but frontend key stored:', backendError);
+      }
+      
       setStatus({ message: 'API key updated successfully', type: 'success' });
       setShowApiKeyModal(false);
       setApiKeyInput('');
@@ -330,20 +359,20 @@ function App() {
               </div>
               <div>
                 <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                  {Number(systemStatus.cycleCount)}
+                  {typeof systemStatus.cycleCount === 'bigint' ? Number(systemStatus.cycleCount) : systemStatus.cycleCount}
                 </div>
                 <div className="text-sm text-slate-500 dark:text-slate-400">Cycles</div>
               </div>
               <div>
                 <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
-                  {Number(systemStatus.logsCount)}
+                  {typeof systemStatus.logsCount === 'bigint' ? Number(systemStatus.logsCount) : systemStatus.logsCount}
                 </div>
                 <div className="text-sm text-slate-500 dark:text-slate-400">Logs</div>
               </div>
               <div>
                 <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
                   {systemStatus.lastUpdate ? 
-                    new Date(Number(systemStatus.lastUpdate) / 1000000).toLocaleTimeString() : 
+                    new Date((typeof systemStatus.lastUpdate === 'bigint' ? Number(systemStatus.lastUpdate) : systemStatus.lastUpdate) / 1000000).toLocaleTimeString() : 
                     'Never'
                   }
                 </div>
@@ -355,7 +384,7 @@ function App() {
 
         {/* Tab Content */}
         {activeTab === 'dashboard' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
             <div className="space-y-6">
               <SentimentGauge 
                 sentiment={dashboardData?.sentiment} 
@@ -365,6 +394,9 @@ function App() {
                 price={dashboardData?.price} 
                 loading={loading && !dashboardData} 
               />
+            </div>
+            <div>
+              <TradingSignals dashboardData={dashboardData} />
             </div>
             <div>
               <LogFeed

@@ -29,8 +29,8 @@ const SentimentGauge = ({ sentiment, loading = false }) => {
     );
   }
 
-  const score = Number(sentiment.score) || 0;
-  const confidence = Number(sentiment.confidence) || 0;
+  const score = (typeof sentiment.score === 'bigint' ? Number(sentiment.score) : sentiment.score) || 0;
+  const confidence = (typeof sentiment.confidence === 'bigint' ? Number(sentiment.confidence) : sentiment.confidence) || 0;
   const keywords = sentiment.keywords || [];
 
   // Determine sentiment category and colors
@@ -152,7 +152,7 @@ const SentimentGauge = ({ sentiment, loading = false }) => {
 
         {sentiment.timestamp && (
           <div className="text-xs text-slate-500 dark:text-slate-400 text-center pt-2 border-t border-slate-200 dark:border-slate-700">
-            Last updated: {new Date(Number(sentiment.timestamp) / 1000000).toLocaleString()}
+            Last updated: {new Date((typeof sentiment.timestamp === 'bigint' ? Number(sentiment.timestamp) : sentiment.timestamp) / 1000000).toLocaleString()}
           </div>
         )}
       </div>

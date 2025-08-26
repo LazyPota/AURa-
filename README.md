@@ -12,6 +12,7 @@ AURA is a production-ready autonomous AI agent that runs 100% on-chain on the In
 - **Price Monitoring**: Live ICP price tracking with 24h change indicators
 - **News Integration**: Automated news fetching and text analysis
 - **Professional Dashboard**: Modern React interface with real-time updates
+- **AI Trading Signals**: Actionable BUY/SELL/HOLD recommendations with confidence, including a baseline signal when market conditions are weak
 
 ### Technical Highlights
 - **100% On-Chain**: Backend runs entirely on Internet Computer canisters
@@ -85,6 +86,11 @@ cd src/aura-frontend
 npm start
 ```
 
+Or from the project root (uses workspace scripts):
+```bash
+npm start
+```
+
 ### 6. Configure NewsAPI Key
 1. Get your free API key from [NewsAPI.org](https://newsapi.org/)
 2. Open the AURA dashboard
@@ -116,6 +122,7 @@ CANISTER_ID_AURA_FRONTEND=<your-frontend-canister-id>
 ### Dashboard Features
 - **Real-time Sentiment**: Bullish/Bearish/Neutral classification with confidence scores
 - **Price Monitoring**: Live ICP price with 24h change indicators
+- **AI Trading Signals**: BUY/SELL/HOLD and volatility alerts with the strongest active signal highlighted
 - **Activity Logs**: Comprehensive system logs with filtering and export
 - **System Status**: Cycle count, connection status, last update time
 - **Architecture View**: Interactive system component diagram
@@ -153,7 +160,7 @@ dfx canister call aura-backend healthCheck
 - **Update Interval**: 5 minutes (300 seconds)
 - **Retry Attempts**: 3 with exponential backoff
 - **Log Rotation**: Maximum 100 entries
-- **HTTP Outcall Budget**: 25-50 billion cycles per request
+- **HTTP Outcall Budget**: 2 billion cycles per request
 
 ### Frontend Configuration
 - **Polling Interval**: 15 seconds

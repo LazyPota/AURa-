@@ -23,7 +23,7 @@ const Dashboard = ({
 
   useEffect(() => {
     if (dashboardData?.lastUpdate) {
-      const updateTime = new Date(Number(dashboardData.lastUpdate) / 1000000);
+      const updateTime = new Date((typeof dashboardData.lastUpdate === 'bigint' ? Number(dashboardData.lastUpdate) : dashboardData.lastUpdate) / 1000000);
       setLastUpdateTime(updateTime.toLocaleString());
     }
   }, [dashboardData]);
@@ -127,43 +127,74 @@ const Dashboard = ({
 
           {dashboardData?.sentiment ? (
             <div className="space-y-4">
-              <div className="text-center">
-                <div className={`text-4xl font-bold mb-2 ${getSentimentColor(dashboardData.sentiment.score)}`}>
-                  {dashboardData.sentiment.score > 0 ? '+' : ''}{dashboardData.sentiment.score}
-                </div>
-                <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getSentimentBg(dashboardData.sentiment.score)} ${getSentimentColor(dashboardData.sentiment.score)}`}>
-                  {getSentimentLabel(dashboardData.sentiment.score)}
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <SentimentGauge 
+                  sentiment={{
+                    score: typeof dashboardData.sentiment.score === 'bigint' ? Number(dashboardData.sentiment.score) : dashboardData.sentiment.score,
+                    confidence: typeof dashboardData.sentiment.confidence === 'bigint' ? Number(dashboardData.sentiment.confidence) : dashboardData.sentiment.confidence,
+                    timestamp: typeof dashboardData.sentiment.timestamp === 'bigint' ? Number(dashboardData.sentiment.timestamp) : dashboardData.sentiment.timestamp,
+                    keywords: dashboardData.sentiment.keywords || []
+                  }}
+                />
+                <PriceCard 
+                  price={{
+                    price: typeof dashboardData.price.price === 'bigint' ? Number(dashboardData.price.price) : dashboardData.price.price,
+                    change24h: typeof dashboardData.price.change24h === 'bigint' ? Number(dashboardData.price.change24h) : dashboardData.price.change24h,
+                    timestamp: typeof dashboardData.price.timestamp === 'bigint' ? Number(dashboardData.price.timestamp) : dashboardData.price.timestamp
+                  }}
+                />
               </div>
+
+              {/* Anomaly Detection Alert */}
+              {dashboardData.anomaly && dashboardData.anomaly.detected && (
+                <div className={`mb-6 p-4 rounded-lg border-l-4 ${
+                  dashboardData.anomaly.severity === 'HIGH' ? 'bg-red-50 border-red-500 text-red-800' :
+                  dashboardData.anomaly.severity === 'MEDIUM' ? 'bg-yellow-50 border-yellow-500 text-yellow-800' :
+                  'bg-blue-50 border-blue-500 text-blue-800'
+                }`}>
+                  <div className="flex items-center">
+                    <span className="text-lg mr-2">
+                      {dashboardData.anomaly.severity === 'HIGH' ? '🚨' : 
+                       dashboardData.anomaly.severity === 'MEDIUM' ? '⚠️' : 'ℹ️'}
+                    </span>
+                    <div>
+                      <h3 className="font-bold text-sm uppercase tracking-wide">
+                        {dashboardData.anomaly.severity} Anomaly Detected
+                      </h3>
+                      <p className="mt-1">{dashboardData.anomaly.description}</p>
+                      <p className="text-xs mt-1 opacity-75">
+                        Price Change: {dashboardData.anomaly.priceChange?.toFixed(2)}% | 
+                        Sentiment Score: {dashboardData.anomaly.sentimentScore}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600 dark:text-slate-400">Confidence</span>
-                  <span className="font-medium">{Math.round(dashboardData.sentiment.confidence * 100)}%</span>
+                  <span className="font-medium">{Math.round((typeof dashboardData.sentiment.confidence === 'bigint' ? Number(dashboardData.sentiment.confidence) : dashboardData.sentiment.confidence) * 100)}%</span>
                 </div>
                 <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
                   <div 
                     className="bg-blue-500 h-2 rounded-full transition-all duration-500"
-                    style={{ width: `${dashboardData.sentiment.confidence * 100}%` }}
+                    style={{ width: `${(typeof dashboardData.sentiment.confidence === 'bigint' ? Number(dashboardData.sentiment.confidence) : dashboardData.sentiment.confidence) * 100}%` }}
                   ></div>
                 </div>
               </div>
 
-              {dashboardData.sentiment.keywords.length > 0 && (
-                <div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">Key Indicators:</p>
-                  <div className="flex flex-wrap gap-1">
-                    {dashboardData.sentiment.keywords.slice(0, 4).map((keyword, index) => (
-                      <span
-                        key={index}
-                        className="px-2 py-1 bg-slate-100 dark:bg-slate-700 text-xs rounded-md text-slate-700 dark:text-slate-300"
-                      >
-                        {keyword}
-                      </span>
-                    ))}
-                  </div>
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+                <div className="text-center text-gray-500">
+                  <div className="text-6xl mb-4">🤖</div>
+                  <p>AURA is initializing...</p>
+                  <p className="text-sm mt-2">Autonomous agent will begin analyzing ICP market sentiment shortly</p>
                 </div>
-              )}
+                <div className="text-center">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Volume</p>
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">High</p>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="text-center text-slate-500 dark:text-slate-400 py-8">
@@ -186,14 +217,14 @@ const Dashboard = ({
             <div className="space-y-4">
               <div className="text-center">
                 <div className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
-                  ${dashboardData.price.price.toFixed(4)}
+                  ${(typeof dashboardData.price.price === 'bigint' ? Number(dashboardData.price.price) : dashboardData.price.price).toFixed(4)}
                 </div>
                 <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                  dashboardData.price.change24h >= 0 
+                  (typeof dashboardData.price.change24h === 'bigint' ? Number(dashboardData.price.change24h) : dashboardData.price.change24h) >= 0 
                     ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
                     : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
                 }`}>
-                  {dashboardData.price.change24h >= 0 ? '+' : ''}{dashboardData.price.change24h.toFixed(2)}%
+                  {(typeof dashboardData.price.change24h === 'bigint' ? Number(dashboardData.price.change24h) : dashboardData.price.change24h) >= 0 ? '+' : ''}{(typeof dashboardData.price.change24h === 'bigint' ? Number(dashboardData.price.change24h) : dashboardData.price.change24h).toFixed(2)}%
                   <span className="ml-1 text-xs">24h</span>
                 </div>
               </div>

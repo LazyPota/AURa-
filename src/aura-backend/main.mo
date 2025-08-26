@@ -55,7 +55,41 @@ persistent actor class AURA() {
     timestamp: Int;
   };
   
+  public type AnomalyData = {
+    detected: Bool;
+    severity: Text; // "LOW", "MEDIUM", "HIGH"
+    description: Text;
+    priceChange: Float;
+    sentimentScore: Int;
+    timestamp: Int;
+  };
+
   public type DashboardData = {
+    sentiment: SentimentData;
+    price: PriceData;
+    anomaly: ?AnomalyData;
+    status: Text;
+    lastUpdate: Int;
+    cycleCount: Nat;
+  };
+
+  // Management canister reference (correct IC http_request interface)
+  transient let ic = actor "aaaaa-aa" : actor {
+    http_request : (request : {
+      url : Text;
+      method : { #get; #head; #post };
+      headers : [HeaderField];
+      body : Blob;
+      transform : ?{
+        function : TransformFunction;
+        context : Blob;
+      };
+      max_response_bytes : ?Nat64;
+    }) -> async HttpResponse;
+  };
+  
+  // Legacy types for migration
+  public type LegacyDashboardData = {
     sentiment: SentimentData;
     price: PriceData;
     status: Text;
@@ -63,15 +97,11 @@ persistent actor class AURA() {
     cycleCount: Nat;
   };
 
-  // Management canister reference
-  transient let ic = actor "aaaaa-aa" : actor {
-    http_request : shared query (HttpRequest, Nat) -> async HttpResult;
-  };
-  
   // Stable state for upgrades
   var logsStable : [Text] = [];
   var apiKeyStable : Text = "";
   var dashboardDataStable : ?DashboardData = null;
+  var legacyDashboardDataStable : ?LegacyDashboardData = null;
   var cycleCountStable : Nat = 0;
   var lastUpdateStable : Int = 0;
   var authorizedCallersStable : [Principal] = [];
@@ -90,18 +120,22 @@ persistent actor class AURA() {
   transient let RETRY_ATTEMPTS : Nat = 3;
   transient let RETRY_DELAY_MS : Nat64 = 2000;
   transient let UPDATE_INTERVAL_NS : Nat64 = 300_000_000_000; // 5 minutes in nanoseconds
+  transient let HTTP_CYCLE_BUDGET : Nat = 2_000_000_000; // cycles to attach per HTTP request
 
-  // Sentiment analysis keywords
+  // Enhanced ICP-specific sentiment analysis keywords
   transient let POSITIVE_KEYWORDS : [Text] = [
     "bullish", "moon", "pump", "rally", "surge", "breakout", "bullrun",
     "adoption", "partnership", "upgrade", "positive", "growth", "gains",
-    "buy", "hodl", "diamond", "hands", "rocket", "lambo"
+    "buy", "hodl", "diamond", "hands", "rocket", "lambo", "canister",
+    "dfinity", "web3", "decentralized", "innovation", "milestone", "launch",
+    "ecosystem", "developer", "enterprise", "scalability", "performance"
   ];
 
   transient let NEGATIVE_KEYWORDS : [Text] = [
     "bearish", "dump", "crash", "dip", "correction", "sell", "panic",
     "fear", "uncertainty", "doubt", "fud", "scam", "hack", "exploit",
-    "regulation", "ban", "decline", "loss", "red", "blood", "capitulation"
+    "regulation", "ban", "decline", "loss", "red", "blood", "capitulation",
+    "vulnerability", "risk", "concern", "issue", "problem", "delay"
   ];
 
   // Initialize system
@@ -150,6 +184,12 @@ persistent actor class AURA() {
   // Security: API key management
   public shared(msg) func setApiKey(key : Text) : async Result.Result<(), Text> {
     let caller = msg.caller;
+    
+    // Auto-authorize the deployer on first API key setting
+    if (authorizedCallers.size() == 0) {
+      authorizedCallers.add(caller);
+      addLog("👤 Auto-authorized deployer: " # Principal.toText(caller));
+    };
     
     // Check if caller is authorized
     let isAuthorized = Buffer.contains<Principal>(authorizedCallers, caller, Principal.equal);
@@ -245,13 +285,51 @@ persistent actor class AURA() {
     Text.fromIter(resultChars.vals())
   };
 
+  // Anomaly detection function
+  private func detectAnomalies(priceData : PriceData, sentimentScore : Int) : ?AnomalyData {
+    let priceChange = Float.abs(priceData.change24h);
+    let sentimentAbs = Int.abs(sentimentScore);
+    
+    // Detect price-sentiment divergence
+    if (priceChange > 10.0 and sentimentAbs < 20) {
+      return ?{
+        detected = true;
+        severity = "HIGH";
+        description = "Large price movement (" # Float.toText(priceData.change24h) # "%) with low sentiment activity";
+        priceChange = priceData.change24h;
+        sentimentScore = sentimentScore;
+        timestamp = Time.now();
+      };
+    } else if (priceChange > 5.0 and sentimentAbs < 10) {
+      return ?{
+        detected = true;
+        severity = "MEDIUM";
+        description = "Moderate price movement with minimal sentiment correlation";
+        priceChange = priceData.change24h;
+        sentimentScore = sentimentScore;
+        timestamp = Time.now();
+      };
+    } else if (sentimentAbs > 50 and priceChange < 2.0) {
+      return ?{
+        detected = true;
+        severity = "MEDIUM";
+        description = "Strong sentiment signal with minimal price response";
+        priceChange = priceData.change24h;
+        sentimentScore = sentimentScore;
+        timestamp = Time.now();
+      };
+    };
+    
+    null
+  };
+
   // Core sentiment analysis function
   public func calculateSentiment(text : Text) : async Int {
     // If no text provided, use fallback sentiment
     if (Text.size(text) == 0) {
       let fallbackSentiment = generateFallbackSentiment();
       addLog("🤖 Using fallback sentiment: " # Float.toText(fallbackSentiment));
-      return Int.abs(Float.toInt(fallbackSentiment * 100.0));
+      return Float.toInt(fallbackSentiment * 100.0);
     };
     
     let lowerText = Text.map(text, func(c : Char) : Char {
@@ -286,14 +364,14 @@ persistent actor class AURA() {
     };
     
     let sentimentRatio = Float.fromInt(positiveScore - negativeScore) / Float.fromInt(totalKeywords);
-    Int.abs(Float.toInt(sentimentRatio * 100.0))
+    Float.toInt(sentimentRatio * 100.0)
   };
 
   // Generate realistic fallback price data that cycles through different values
   private func generateFallbackPrice() : Float {
     let cycle = cycleCount % 24; // 24 different price points
     let basePrice = 8.5; // Base ICP price around $8.50
-    let variation = 0.8; // ±$0.80 variation
+    let _variation = 0.8; // ±$0.80 variation
     
     // Create a realistic price pattern that cycles
     let priceVariations = [
@@ -310,20 +388,22 @@ persistent actor class AURA() {
     if (finalPrice < 0.1) { 0.1 } else { finalPrice }
   };
 
-  // Generate realistic fallback news data
+  // Generate realistic ICP-focused fallback news data
   private func generateFallbackNews() : Text {
-    let cycle = cycleCount % 6; // 6 different news patterns
+    let cycle = cycleCount % 8; // 8 different ICP-focused news patterns
     
     let newsTemplates = [
-      "Tech giants announce new blockchain partnerships. Industry experts predict increased adoption of decentralized technologies in 2024.",
-      "Cryptocurrency markets show mixed signals as regulatory frameworks evolve globally. Traders remain cautiously optimistic.",
-      "DeFi protocols report record-breaking transaction volumes. Yield farming strategies continue to attract institutional investors.",
-      "Web3 gaming sector experiences unprecedented growth. Play-to-earn models revolutionize traditional gaming industry.",
-      "Central banks explore CBDC implementations. Digital currency adoption accelerates across major economies.",
-      "AI and blockchain convergence creates new opportunities. Smart contracts powered by machine learning gain traction."
+      "Internet Computer Protocol shows strong network growth with increased canister deployments. DFINITY Foundation announces new developer incentives for Web3 applications.",
+      "ICP price demonstrates resilience amid market volatility. Institutional adoption of Internet Computer blockchain accelerates with enterprise partnerships.",
+      "DFINITY unveils major protocol upgrade enhancing smart contract capabilities. Internet Computer network processes record transaction volumes this quarter.",
+      "Web3 developers migrate to Internet Computer for superior performance and cost efficiency. ICP ecosystem expands with innovative DeFi protocols.",
+      "Internet Computer blockchain achieves new milestone in decentralized hosting. DFINITY research team publishes breakthrough in consensus mechanisms.",
+      "ICP community celebrates successful governance proposals. Internet Computer Protocol demonstrates true decentralization with autonomous canisters.",
+      "Major tech companies explore Internet Computer for enterprise blockchain solutions. DFINITY Foundation reports significant developer ecosystem growth.",
+      "Internet Computer Protocol leads innovation in chain-key cryptography. ICP network demonstrates unmatched scalability for Web3 applications."
     ];
     
-    let templateIndex = cycle % 6;
+    let templateIndex = cycle % 8;
     newsTemplates[templateIndex]
   };
 
@@ -343,39 +423,34 @@ persistent actor class AURA() {
   private func fetchPrice() : async Result.Result<PriceData, Text> {
     let url = "https://api.coingecko.com/api/v3/simple/price?ids=internet-computer&vs_currencies=usd&include_24hr_change=true";
     
-    let request : HttpRequest = {
-      url = url;
-      method = #get;
-      headers = [
-        ("User-Agent", "AURA-Bot/1.0"),
-        ("Accept", "application/json")
-      ];
-      body = Blob.fromArray([]);
-      transform = ?transform;
-    };
-    
     var attempts = 0;
     while (attempts < RETRY_ATTEMPTS) {
       try {
-        let response = await ic.http_request(request, 25_000_000_000);
-        switch (response) {
-          case (#ok(res)) {
-            if (res.status == 200) {
-              switch (Text.decodeUtf8(res.body)) {
-                case (?jsonText) {
-                  return parsePrice(jsonText);
-                };
-                case null {
-                  addLog("❌ Failed to decode price response");
-                };
-              };
-            } else {
-              addLog("❌ Price API returned status: " # Nat.toText(res.status));
-            };
+        let req = {
+          url = url;
+          method = #get;
+          headers = [
+            ("User-Agent", "AURA-Bot/1.0"),
+            ("Accept", "application/json")
+          ];
+          body = Blob.fromArray([]);
+          transform = ?{
+            function = transform;
+            context = Blob.fromArray([]);
           };
-          case (#err(msg)) {
-            addLog("❌ Price API error: " # msg);
+          max_response_bytes = null;
+        };
+
+        // Attach cycles for HTTP outcall using parenthetical syntax
+        let res = await (with cycles = HTTP_CYCLE_BUDGET) ic.http_request(req);
+
+        if (res.status == 200) {
+          switch (Text.decodeUtf8(res.body)) {
+            case (?jsonText) { return parsePrice(jsonText); };
+            case null { addLog("❌ Failed to decode price response"); };
           };
+        } else {
+          addLog("❌ Price API returned status: " # Nat.toText(res.status));
         };
       } catch (_) {
         addLog("❌ Price fetch exception occurred");
@@ -461,54 +536,48 @@ persistent actor class AURA() {
     };
   };
 
-  // Fetch news from NewsAPI
+  // Fetch ICP/DFINITY-specific news from NewsAPI
   private func fetchNewsAsText() : async Result.Result<Text, Text> {
     if (apiKey == "") {
       // Fallback in local/dev: don't block cycle if key not set
-      return #ok("");
+      let fallbackNews = generateFallbackNews();
+      addLog("📰 Using fallback ICP news: " # fallbackNews);
+      return #ok(fallbackNews);
     };
     
-    let url = "https://newsapi.org/v2/top-headlines?category=technology&language=en&pageSize=10&apiKey=" # apiKey;
-    
-    let request : HttpRequest = {
-      url = url;
-      method = #get;
-      headers = [
-        ("User-Agent", "AURA-Bot/1.0"),
-        ("Accept", "application/json"),
-        // Avoid gzip/deflate since we don't decompress in canister
-        ("Accept-Encoding", "identity"),
-        ("Host", "newsapi.org"),
-        // Some providers require API key in header even with query param
-        ("X-Api-Key", apiKey)
-      ];
-      body = Blob.fromArray([]);
-      transform = ?transform;
-    };
+    // Target ICP, Internet Computer, and DFINITY specifically
+    let url = "https://newsapi.org/v2/everything?q=(\"Internet Computer\" OR \"ICP\" OR \"DFINITY\") AND (crypto OR blockchain OR web3)&language=en&pageSize=15&sortBy=publishedAt&apiKey=" # apiKey;
     
     var attempts = 0;
     while (attempts < RETRY_ATTEMPTS) {
       try {
-        // Increase timeout budget for external API
-        let response = await ic.http_request(request, 90_000_000_000);
-        switch (response) {
-          case (#ok(res)) {
-            if (res.status == 200) {
-              switch (Text.decodeUtf8(res.body)) {
-                case (?jsonText) {
-                  return extractNewsText(jsonText);
-                };
-                case null {
-                  addLog("❌ Failed to decode news response");
-                };
-              };
-            } else {
-              addLog("❌ News API returned status: " # Nat.toText(res.status));
-            };
+        let req = {
+          url = url;
+          method = #get;
+          headers = [
+            ("User-Agent", "AURA-Bot/1.0"),
+            ("Accept", "application/json"),
+            ("Accept-Encoding", "identity"),
+            ("X-Api-Key", apiKey)
+          ];
+          body = Blob.fromArray([]);
+          transform = ?{
+            function = transform;
+            context = Blob.fromArray([]);
           };
-          case (#err(msg)) {
-            addLog("❌ News API error: " # msg);
-          };
+          max_response_bytes = null;
+        };
+
+        // Attach cycles for HTTP outcall using parenthetical syntax
+        let res = await (with cycles = HTTP_CYCLE_BUDGET) ic.http_request(req);
+
+        if (res.status == 200) {
+          switch (Text.decodeUtf8(res.body)) {
+            case (?jsonText) { return extractNewsText(jsonText); };
+            case null { addLog("❌ Failed to decode news response"); };
+          };  
+        } else {
+          addLog("❌ News API returned status: " # Nat.toText(res.status));
         };
       } catch (_) {
         addLog("❌ News fetch exception occurred");
@@ -660,9 +729,11 @@ persistent actor class AURA() {
     // Update dashboard data
     switch (priceData, sentimentData) {
       case (?priceResult, ?sentiment) {
+        let anomaly = detectAnomalies(priceResult, sentiment.score);
         dashboardData := ?{
           sentiment = sentiment;
           price = priceResult;
+          anomaly = anomaly;
           status = "Active";
           lastUpdate = Time.now();
           cycleCount = cycleCount + 1;
@@ -678,9 +749,11 @@ persistent actor class AURA() {
           timestamp = Time.now();
           keywords = [];
         };
+        let anomaly = detectAnomalies(priceResult, defaultSentiment.score);
         dashboardData := ?{
           sentiment = defaultSentiment;
           price = priceResult;
+          anomaly = anomaly;
           status = "Partial (Price Only)";
           lastUpdate = Time.now();
           cycleCount = cycleCount + 1;
@@ -699,9 +772,11 @@ persistent actor class AURA() {
       };
     };
   };
+  let anomaly = detectAnomalies(defaultPrice, sentiment.score);
   dashboardData := ?{
     sentiment = sentiment;
     price = defaultPrice;
+    anomaly = anomaly;
     status = "Partial (Sentiment Only)";
     lastUpdate = Time.now();
     cycleCount = cycleCount + 1;
@@ -975,7 +1050,16 @@ persistent actor class AURA() {
   system func postupgrade() {
     logs := Buffer.fromArray(logsStable);
     apiKey := apiKeyStable;
+    
+    // Migration logic for DashboardData with new anomaly field
     dashboardData := dashboardDataStable;
+    
+    // If no new data but legacy data exists, clear it and let system reinitialize
+    if (Option.isNull(dashboardData) and Option.isSome(legacyDashboardDataStable)) {
+      addLog("🔄 Migrating from legacy DashboardData format");
+      dashboardData := null; // Will be populated by next cycle
+    };
+    
     cycleCount := cycleCountStable;
     lastUpdate := lastUpdateStable;
     authorizedCallers := Buffer.fromArray(authorizedCallersStable);
@@ -996,5 +1080,3 @@ persistent actor class AURA() {
     await initializeSystem();
   };
 }
-
-

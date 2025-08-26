@@ -190,7 +190,7 @@ const Architecture = () => {
           </div>
         ))}
 
-        {/* Connection Lines */}
+        {/* Connection Lines - Simplified and Clean */}
         <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%">
           {connections.map((connection, index) => {
             const fromComponent = components.find(c => c.id === connection.from);
@@ -198,33 +198,48 @@ const Architecture = () => {
             
             if (!fromComponent || !toComponent) return null;
 
-            // Calculate positions (simplified)
-            const fromX = fromComponent.position.left ? 
-              parseFloat(fromComponent.position.left) : 
-              100 - parseFloat(fromComponent.position.right);
-            const fromY = fromComponent.position.top ? 
-              parseFloat(fromComponent.position.top) : 
-              100 - parseFloat(fromComponent.position.bottom);
-            
-            const toX = toComponent.position.left ? 
-              parseFloat(toComponent.position.left) : 
-              100 - parseFloat(toComponent.position.right);
-            const toY = toComponent.position.top ? 
-              parseFloat(toComponent.position.top) : 
-              100 - parseFloat(toComponent.position.bottom);
+            // Simplified position calculation
+            const getPosition = (comp) => {
+              if (comp.position.left && comp.position.top) {
+                return { x: parseFloat(comp.position.left), y: parseFloat(comp.position.top) };
+              }
+              if (comp.position.right && comp.position.top) {
+                return { x: 100 - parseFloat(comp.position.right), y: parseFloat(comp.position.top) };
+              }
+              if (comp.position.left && comp.position.bottom) {
+                return { x: parseFloat(comp.position.left), y: 100 - parseFloat(comp.position.bottom) };
+              }
+              if (comp.position.right && comp.position.bottom) {
+                return { x: 100 - parseFloat(comp.position.right), y: 100 - parseFloat(comp.position.bottom) };
+              }
+              return { x: 50, y: 50 };
+            };
+
+            const fromPos = getPosition(fromComponent);
+            const toPos = getPosition(toComponent);
 
             return (
-              <line
-                key={index}
-                x1={`${fromX}%`}
-                y1={`${fromY}%`}
-                x2={`${toX}%`}
-                y2={`${toY}%`}
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeDasharray={connection.type === 'bidirectional' ? '0' : '5,5'}
-                className="text-slate-400 dark:text-slate-500 opacity-60"
-              />
+              <g key={index}>
+                <line
+                  x1={`${fromPos.x}%`}
+                  y1={`${fromPos.y}%`}
+                  x2={`${toPos.x}%`}
+                  y2={`${toPos.y}%`}
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeDasharray={connection.type === 'bidirectional' ? '0' : '8,4'}
+                  className="text-blue-400 dark:text-blue-500 opacity-50 transition-opacity hover:opacity-80"
+                />
+                {connection.type === 'bidirectional' && (
+                  <circle
+                    cx={`${(fromPos.x + toPos.x) / 2}%`}
+                    cy={`${(fromPos.y + toPos.y) / 2}%`}
+                    r="3"
+                    fill="currentColor"
+                    className="text-blue-500 opacity-70"
+                  />
+                )}
+              </g>
             );
           })}
         </svg>
@@ -256,15 +271,20 @@ const Architecture = () => {
         </div>
       )}
 
-      {/* Legend */}
-      <div className="flex items-center justify-center gap-6 mt-4 text-xs text-slate-500 dark:text-slate-400">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-0.5 bg-slate-400"></div>
-          <span>Bidirectional</span>
+      {/* Enhanced Legend */}
+      <div className="flex items-center justify-between mt-4 text-xs text-slate-500 dark:text-slate-400">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-0.5 bg-blue-400 rounded-full"></div>
+            <span>Bidirectional Flow</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-0.5 bg-blue-400 opacity-60" style={{ backgroundImage: 'repeating-linear-gradient(to right, transparent, transparent 3px, currentColor 3px, currentColor 6px)' }}></div>
+            <span>Data Request</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-0.5 bg-slate-400" style={{ backgroundImage: 'repeating-linear-gradient(to right, transparent, transparent 2px, currentColor 2px, currentColor 4px)' }}></div>
-          <span>Unidirectional</span>
+        <div className="text-xs font-medium text-slate-600 dark:text-slate-300">
+          🔄 Real-time • 🛡️ Secure • ⚡ Autonomous
         </div>
       </div>
     </div>
